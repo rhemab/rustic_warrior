@@ -89,6 +89,13 @@ pub struct Sprite {
     scale: f32,
 }
 
+pub struct Assets {
+    pub blue_units: Units,
+    pub red_units: Units,
+    pub terrain: Terrain,
+    pub tiles: Texture2D,
+}
+
 impl Terrain {
     pub fn new() -> Self {
         // tree1

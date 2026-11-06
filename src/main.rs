@@ -42,12 +42,15 @@ struct Unit {
 }
 
 #[derive(Default)]
-struct GameState {
+struct Game {
     grass: Vec<Vec<bool>>,
     units: Vec<Unit>,
     enemy_units: Vec<Unit>,
     selected_unit: Option<usize>,
     mouse_pos: Vec2,
+    total_frame_time: f32,
+    hovering_unit: Option<usize>,
+    available_moves: Vec<[usize; 2]>,
 }
 
 #[macroquad::main("Rustic Warrior")]
@@ -62,8 +65,15 @@ async fn main() {
     let tiles = Texture2D::from_file_with_format(TILEMAP, None);
     tiles.set_filter(FilterMode::Nearest);
 
-    let mut game_state = GameState::default();
-    game_state.grass = vec![vec![true; NUM_SQUARES]; NUM_SQUARES];
+    let assets = assets::Assets {
+        blue_units,
+        red_units,
+        terrain,
+        tiles,
+    };
+
+    let mut game = Game::default();
+    game.grass = vec![vec![true; NUM_SQUARES]; NUM_SQUARES];
 
     // generate units
     {
@@ -71,15 +81,13 @@ async fn main() {
         let y = 12;
 
         let warrior = new_unit(UnitKind::Warrior, x, y);
-        game_state.units.push(warrior);
+        game.units.push(warrior);
 
         let enemy_archer = new_unit(UnitKind::Archer, x + 1, y);
-        game_state.enemy_units.push(enemy_archer);
+        game.enemy_units.push(enemy_archer);
     }
 
-    let mut available_moves: Vec<[usize; 2]> = vec![];
-
-    let mut t = 0.0;
+    // let mut available_moves: Vec<[usize; 2]> = vec![];
 
     let mut cam = Camera2D::default();
     cam.target = vec2(NUM_SQUARES as f32 * SQUARE_SIZE / 2.0, 600.0);
@@ -89,26 +97,88 @@ async fn main() {
         set_camera(&cam);
         clear_background(Color::from_rgba(71, 171, 169, 255));
 
-        t += get_frame_time();
+        game.total_frame_time += get_frame_time();
 
         {
             let (mx, my) = mouse_position();
             let mouse_world = cam.screen_to_world(vec2(mx, my));
-            game_state.mouse_pos = mouse_world;
+            game.mouse_pos = mouse_world;
         }
 
+        // handle mouse drag
+        if is_mouse_button_down(MouseButton::Left) {
+            let delta = mouse_delta_position();
+            cam.target.x += delta.x / cam.zoom.x;
+            cam.target.y += delta.y / cam.zoom.y;
+        }
+
+        game.update();
+        game.draw(&assets);
+
+        next_frame().await
+    }
+}
+
+impl Game {
+    fn update(&mut self) {
+        // check for hovered unit
+        self.hovering_unit = None;
+        for (i, unit) in self.units.iter().enumerate() {
+            let pos = unit.view_pos;
+            if self.mouse_in(pos) {
+                self.hovering_unit = Some(i);
+            }
+        }
+
+        if let Some(i) = self.selected_unit {
+            let unit = &self.units[i];
+            self.available_moves = unit.get_available_moves(&self);
+        }
+
+        // check for selected unit
+        if is_mouse_button_pressed(MouseButton::Left) {
+            if let Some(i) = self.selected_unit {
+                if self.hovering_unit.is_none() {
+                    for game_pos in &self.available_moves {
+                        let pos = vec2(
+                            game_pos[0] as f32 * SQUARE_SIZE,
+                            game_pos[1] as f32 * SQUARE_SIZE,
+                        );
+                        if self.mouse_in(pos) {
+                            self.units[i].game_pos = *game_pos;
+                        }
+                    }
+                }
+            }
+            self.selected_unit = self.hovering_unit;
+        }
+
+        let dt = get_frame_time();
+
+        for unit in &mut self.units {
+            unit.update_pos(dt);
+        }
+
+        for unit in &mut self.enemy_units {
+            unit.update_pos(dt);
+        }
+    }
+    fn draw(&self, assets: &assets::Assets) {
         // draw grass
         for x in 0..NUM_SQUARES {
             for y in 0..NUM_SQUARES {
                 let px = x as f32 * SQUARE_SIZE;
                 let py = y as f32 * SQUARE_SIZE;
-                if !game_state.grass[y][x] {
-                    terrain.water.draw(t, px, py, false);
+                if !self.grass[y][x] {
+                    assets
+                        .terrain
+                        .water
+                        .draw(self.total_frame_time, px, py, false);
                     continue;
                 }
-                let (c, r) = pick_tile(&game_state.grass, x as i32, y as i32);
+                let (c, r) = pick_tile(&self.grass, x as i32, y as i32);
                 draw_texture_ex(
-                    &tiles,
+                    &assets.tiles,
                     px,
                     py,
                     WHITE,
@@ -128,95 +198,81 @@ async fn main() {
                 let py = y as f32 * SQUARE_SIZE;
 
                 if x == 3 && y == 4 {
-                    terrain.cloud1.draw(t, px, py, false);
+                    assets
+                        .terrain
+                        .cloud1
+                        .draw(self.total_frame_time, px, py, false);
                 }
                 if x == 13 && y == 4 {
-                    terrain.cloud2.draw(t, px, py, false);
+                    assets
+                        .terrain
+                        .cloud2
+                        .draw(self.total_frame_time, px, py, false);
                 }
                 if x == 20 && y == 4 {
-                    terrain.cloud3.draw(t, px, py, false);
+                    assets
+                        .terrain
+                        .cloud3
+                        .draw(self.total_frame_time, px, py, false);
                 }
                 if x == 20 && y == 4 {
-                    terrain.cloud4.draw(t, px, py, false);
+                    assets
+                        .terrain
+                        .cloud4
+                        .draw(self.total_frame_time, px, py, false);
                 }
                 if x == 10 && y == 10 {
-                    terrain.tree1.draw(t, px, py, false);
+                    assets
+                        .terrain
+                        .tree1
+                        .draw(self.total_frame_time, px, py, false);
                 }
                 if x == 20 && y == 12 {
-                    terrain.tree1.draw(t, px, py, false);
+                    assets
+                        .terrain
+                        .tree1
+                        .draw(self.total_frame_time, px, py, false);
                 }
             }
-        }
-
-        // check for hovered unit
-        let mut hovering_unit = None;
-        for (i, unit) in game_state.units.iter().enumerate() {
-            let pos = unit.view_pos;
-            if game_state.mouse_in(pos) {
-                draw_rectangle(pos.x, pos.y, SQUARE_SIZE, SQUARE_SIZE, HOVER_COLOR);
-                hovering_unit = Some(i);
-            }
-        }
-
-        if is_mouse_button_pressed(MouseButton::Left) {
-            if let Some(i) = game_state.selected_unit {
-                if hovering_unit.is_none() {
-                    for game_pos in &available_moves {
-                        let pos = vec2(
-                            game_pos[0] as f32 * SQUARE_SIZE,
-                            game_pos[1] as f32 * SQUARE_SIZE,
-                        );
-                        if game_state.mouse_in(pos) {
-                            game_state.units[i].game_pos = *game_pos;
-                        }
-                    }
-                }
-            }
-            game_state.selected_unit = hovering_unit;
         }
 
         // show available moves for selected unit
-        if let Some(i) = game_state.selected_unit {
-            let unit = &game_state.units[i];
-            available_moves = unit.get_available_moves(&game_state);
-            for game_pos in &available_moves {
+        if let Some(_) = self.selected_unit {
+            for game_pos in &self.available_moves {
                 let pos = vec2(
                     game_pos[0] as f32 * SQUARE_SIZE,
                     game_pos[1] as f32 * SQUARE_SIZE,
                 );
                 let mut color = MOVEMENT_COLOR;
-                if game_state.mouse_in(pos) {
+                if self.mouse_in(pos) {
                     color = Color::from_rgba(255, 255, 255, 200);
                 }
                 draw_rectangle(pos.x, pos.y, SQUARE_SIZE - 1.0, SQUARE_SIZE - 1.0, color);
             }
         }
 
+        // highlight hovered unit
+        if let Some(i) = self.hovering_unit {
+            let unit = &self.units[i];
+            draw_rectangle(
+                unit.view_pos.x,
+                unit.view_pos.y,
+                SQUARE_SIZE,
+                SQUARE_SIZE,
+                HOVER_COLOR,
+            );
+        }
+
         // draw units last
-        let dt = get_frame_time();
-
-        for unit in &mut game_state.units {
-            unit.update_pos(dt);
-            unit.draw(t, &blue_units);
+        for unit in &self.units {
+            unit.draw(self.total_frame_time, &assets.blue_units);
         }
 
-        for unit in &mut game_state.enemy_units {
-            unit.update_pos(dt);
-            unit.draw(t, &red_units);
+        for unit in &self.enemy_units {
+            unit.draw(self.total_frame_time, &assets.red_units);
         }
-
-        // handle mouse drag
-        if is_mouse_button_down(MouseButton::Left) {
-            let delta = mouse_delta_position();
-            cam.target.x += delta.x / cam.zoom.x;
-            cam.target.y += delta.y / cam.zoom.y;
-        }
-
-        next_frame().await
     }
-}
 
-impl GameState {
     fn mouse_in(&self, pos: Vec2) -> bool {
         let x_max = pos.x + SQUARE_SIZE;
         let y_max = pos.y + SQUARE_SIZE;
@@ -273,7 +329,7 @@ impl Unit {
         }
     }
 
-    fn get_available_moves(&self, game_state: &GameState) -> Vec<Cell> {
+    fn get_available_moves(&self, game: &Game) -> Vec<Cell> {
         let mut available_moves = vec![];
         let x = self.game_pos[0];
         let y = self.game_pos[1];
@@ -292,12 +348,8 @@ impl Unit {
                 if visited.contains(&pos) {
                     continue;
                 }
-                let occupied = game_state
-                    .units
-                    .iter()
-                    .find(|u| u.game_pos == pos)
-                    .is_some()
-                    || game_state
+                let occupied = game.units.iter().find(|u| u.game_pos == pos).is_some()
+                    || game
                         .enemy_units
                         .iter()
                         .find(|u| u.game_pos == pos)
