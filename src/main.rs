@@ -37,11 +37,13 @@ struct Unit {
     speed: f32,
 }
 
+#[derive(Default)]
 struct GameState {
     grass: Vec<Vec<bool>>,
     units: Vec<Unit>,
     enemy_units: Vec<Unit>,
     selected_unit: Option<usize>,
+    mouse_pos: Vec2,
 }
 
 #[macroquad::main("Rustic Warrior")]
@@ -56,12 +58,8 @@ async fn main() {
     let tiles = Texture2D::from_file_with_format(TILEMAP, None);
     tiles.set_filter(FilterMode::Nearest);
 
-    let mut game_state = GameState {
-        grass: vec![vec![true; NUM_SQUARES]; NUM_SQUARES],
-        units: vec![],
-        enemy_units: vec![],
-        selected_unit: None,
-    };
+    let mut game_state = GameState::default();
+    game_state.grass = vec![vec![true; NUM_SQUARES]; NUM_SQUARES];
 
     // generate units
     {
@@ -89,8 +87,11 @@ async fn main() {
 
         t += get_frame_time();
 
-        let (mx, my) = mouse_position();
-        let mouse_world = cam.screen_to_world(vec2(mx, my));
+        {
+            let (mx, my) = mouse_position();
+            let mouse_world = cam.screen_to_world(vec2(mx, my));
+            game_state.mouse_pos = mouse_world;
+        }
 
         // draw grass
         for x in 0..NUM_SQUARES {
@@ -147,14 +148,9 @@ async fn main() {
         let mut hovering_unit = None;
         for (i, unit) in game_state.units.iter().enumerate() {
             let pos = unit.view_pos;
-            let x_max = pos.x + SQUARE_SIZE;
-            let y_max = pos.y + SQUARE_SIZE;
-
-            if mouse_world.x > pos.x && mouse_world.x < x_max {
-                if mouse_world.y > pos.y && mouse_world.y < y_max {
-                    draw_rectangle(pos.x, pos.y, SQUARE_SIZE, SQUARE_SIZE, HOVER_COLOR);
-                    hovering_unit = Some(i);
-                }
+            if game_state.mouse_in(pos) {
+                draw_rectangle(pos.x, pos.y, SQUARE_SIZE, SQUARE_SIZE, HOVER_COLOR);
+                hovering_unit = Some(i);
             }
         }
 
@@ -166,12 +162,8 @@ async fn main() {
                             game_pos[0] as f32 * SQUARE_SIZE,
                             game_pos[1] as f32 * SQUARE_SIZE,
                         );
-                        let x_max = pos.x + SQUARE_SIZE;
-                        let y_max = pos.y + SQUARE_SIZE;
-                        if mouse_world.x > pos.x && mouse_world.x < x_max {
-                            if mouse_world.y > pos.y && mouse_world.y < y_max {
-                                game_state.units[i].game_pos = *game_pos;
-                            }
+                        if game_state.mouse_in(pos) {
+                            game_state.units[i].game_pos = *game_pos;
                         }
                     }
                 }
@@ -189,12 +181,8 @@ async fn main() {
                     game_pos[1] as f32 * SQUARE_SIZE,
                 );
                 let mut color = MOVEMENT_COLOR;
-                let x_max = pos.x + SQUARE_SIZE;
-                let y_max = pos.y + SQUARE_SIZE;
-                if mouse_world.x > pos.x && mouse_world.x < x_max {
-                    if mouse_world.y > pos.y && mouse_world.y < y_max {
-                        color = Color::from_rgba(255, 255, 255, 200);
-                    }
+                if game_state.mouse_in(pos) {
+                    color = Color::from_rgba(255, 255, 255, 200);
                 }
                 draw_rectangle(pos.x, pos.y, SQUARE_SIZE - 1.0, SQUARE_SIZE - 1.0, color);
             }
@@ -221,6 +209,21 @@ async fn main() {
         }
 
         next_frame().await
+    }
+}
+
+impl GameState {
+    fn mouse_in(&self, pos: Vec2) -> bool {
+        let x_max = pos.x + SQUARE_SIZE;
+        let y_max = pos.y + SQUARE_SIZE;
+
+        if self.mouse_pos.x > pos.x && self.mouse_pos.x < x_max {
+            if self.mouse_pos.y > pos.y && self.mouse_pos.y < y_max {
+                return true;
+            }
+        }
+
+        false
     }
 }
 
@@ -305,7 +308,7 @@ impl Unit {
             }
 
             visited.push(pos);
-            available_moves.push([pos[0], pos[1]]);
+            available_moves.push(pos);
 
             q.push_back([pos[0] + 1, pos[1]]);
             q.push_back([pos[0].saturating_sub(1), pos[1]]);
