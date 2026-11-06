@@ -1,5 +1,7 @@
 use macroquad::prelude::*;
 
+use std::collections::{HashMap, VecDeque};
+
 mod assets;
 
 pub const SQUARE_SIZE: f32 = 50.0;
@@ -12,6 +14,8 @@ const MOVEMENT_COLOR: Color = Color::from_rgba(255, 255, 255, 80);
 
 pub const TILEMAP: &[u8] =
     include_bytes!("../assets/tiny_swords/Terrain/Tileset/Tilemap_color1.png");
+
+type Cell = [usize; 2];
 
 #[derive(Debug, Clone, Copy)]
 enum UnitKind {
@@ -269,21 +273,22 @@ impl Unit {
         }
     }
 
-    fn get_available_moves(&self, game_state: &GameState) -> Vec<[usize; 2]> {
+    fn get_available_moves(&self, game_state: &GameState) -> Vec<Cell> {
         let mut available_moves = vec![];
         let x = self.game_pos[0];
         let y = self.game_pos[1];
 
         let mut visited = vec![];
 
-        let mut q = std::collections::VecDeque::new();
+        let mut came_from: HashMap<Cell, Cell> = HashMap::new();
+        let mut dist: HashMap<Cell, usize> = HashMap::new();
+        let mut q = VecDeque::new();
         let root = [x, y];
+        dist.insert(root, 0);
         q.push_back(root);
 
-        while let Some(mut pos) = q.pop_front() {
+        while let Some(pos) = q.pop_front() {
             if pos != root {
-                pos[0] = pos[0].clamp(0, NUM_SQUARES - 1);
-                pos[1] = pos[1].clamp(0, NUM_SQUARES - 1);
                 if visited.contains(&pos) {
                     continue;
                 }
@@ -300,24 +305,35 @@ impl Unit {
                 if occupied {
                     continue;
                 }
-                let x_diff = pos[0].abs_diff(x);
-                let y_diff = pos[1].abs_diff(y);
-                if x_diff + y_diff > self.movement {
-                    continue;
-                }
             }
 
             visited.push(pos);
-            available_moves.push(pos);
 
-            q.push_back([pos[0] + 1, pos[1]]);
-            q.push_back([pos[0].saturating_sub(1), pos[1]]);
-            q.push_back([pos[0], pos[1] + 1]);
-            q.push_back([pos[0], pos[1].saturating_sub(1)]);
-            q.push_back([pos[0] + 1, pos[1] + 1]);
-            q.push_back([pos[0] + 1, pos[1].saturating_sub(1)]);
-            q.push_back([pos[0].saturating_sub(1), pos[1] + 1]);
-            q.push_back([pos[0].saturating_sub(1), pos[1].saturating_sub(1)]);
+            if let Some(d) = dist.get(&pos) {
+                if *d > self.movement {
+                    continue;
+                }
+                available_moves.push(pos);
+            }
+
+            let next_positions = [
+                [pos[0], pos[1] + 1],               // up
+                [pos[0], pos[1].saturating_sub(1)], // down
+                [pos[0].saturating_sub(1), pos[1]], // left
+                [pos[0] + 1, pos[1]],               // right
+            ];
+
+            for mut next_pos in next_positions {
+                next_pos[0] = next_pos[0].clamp(0, NUM_SQUARES - 1);
+                next_pos[1] = next_pos[1].clamp(0, NUM_SQUARES - 1);
+
+                if let Some(d) = dist.get(&pos) {
+                    dist.insert(next_pos, d + 1);
+                }
+
+                came_from.insert(pos, next_pos);
+                q.push_back(next_pos);
+            }
         }
 
         available_moves
