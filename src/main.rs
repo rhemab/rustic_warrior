@@ -24,7 +24,7 @@ enum UnitKind {
     Archer,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum Action {
     Idle,
     Run,
@@ -40,6 +40,7 @@ struct Unit {
     flip_x: bool,
     movement: usize,
     speed: f32,
+    move_path: Vec<Cell>,
 }
 
 #[derive(Default)]
@@ -142,14 +143,15 @@ impl Game {
         if is_mouse_button_pressed(MouseButton::Left) {
             if let Some(i) = self.selected_unit {
                 if self.hovering_unit.is_none() {
-                    // trying to move selected peice
-                    for game_pos in &self.available_moves {
-                        let pos = vec2(
-                            game_pos[0] as f32 * SQUARE_SIZE,
-                            game_pos[1] as f32 * SQUARE_SIZE,
-                        );
-                        if self.mouse_in_pos(pos) {
-                            self.units[i].game_pos = *game_pos;
+                    // move selected piece
+                    if let Some(cell) = &self.mouse_to_cell() {
+                        if self.available_moves.contains(cell) {
+                            self.units[i].move_path.push(*cell);
+                            let mut curr_cell = cell;
+                            while let Some(c) = self.came_from.get(curr_cell) {
+                                curr_cell = c;
+                                self.units[i].move_path.push(*c);
+                            }
                         }
                     }
                 }
@@ -324,6 +326,11 @@ impl Game {
 
 impl Unit {
     fn update_pos(&mut self, dt: f32) {
+        if self.action == Action::Idle
+            && let Some(cell) = self.move_path.pop()
+        {
+            self.game_pos = cell;
+        }
         let target_pos = vec2(
             self.game_pos[0] as f32 * SQUARE_SIZE,
             self.game_pos[1] as f32 * SQUARE_SIZE,
@@ -461,5 +468,6 @@ fn new_unit(unit_kind: UnitKind, x: usize, y: usize) -> Unit {
         flip_x: false,
         movement: 5,
         speed: 50.0,
+        move_path: vec![],
     }
 }
