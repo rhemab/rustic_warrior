@@ -83,7 +83,7 @@ pub struct Unit {
 #[derive(Debug)]
 pub struct Sprite {
     tex: Texture2D,
-    frames: f32,
+    pub frames: f32,
     frame_width: f32,
     frame_height: f32,
     scale: f32,
@@ -344,8 +344,12 @@ impl Units {
 }
 
 impl Sprite {
-    pub fn draw(&self, t: f32, x: f32, y: f32, flip_x: bool) {
-        let frame = ((t * FPS) as usize) % self.frames as usize;
+    pub fn draw(&self, t: f32, x: f32, y: f32, flip_x: bool, wrap: bool) {
+        let frame = if wrap {
+            ((t * FPS) as usize).min(self.frames as usize - 1)
+        } else {
+            ((t * FPS) as usize) % self.frames as usize
+        };
         let scale = self.scale;
         let size = SQUARE_SIZE * scale;
         let offset = (size - SQUARE_SIZE) / 2.0;

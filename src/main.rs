@@ -10,6 +10,7 @@ const NUM_SQUARES: usize = 30;
 pub const FPS: f32 = 10.0;
 
 const HOVER_COLOR: Color = Color::from_rgba(255, 255, 255, 64);
+const RED_HOVER_COLOR: Color = Color::from_rgba(255, 0, 0, 100);
 const AVAILABLE_MOVES_COLOR: Color = Color::from_rgba(255, 255, 255, 80);
 const SELECT_MOVE_COLOR: Color = Color::from_rgba(255, 255, 255, 200);
 
@@ -28,7 +29,7 @@ enum UnitKind {
 enum Action {
     Idle,
     Run,
-    Attack,
+    Attack(f32), // attack hold total animation time
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +41,7 @@ struct Unit {
     flip_x: bool,
     movement: usize,
     speed: f32,
+    range: usize,
     move_path: Vec<Cell>,
 }
 
@@ -52,6 +54,7 @@ struct Game {
     mouse_pos: Vec2,
     total_frame_time: f32,
     hovering_unit: Option<usize>,
+    hovering_enemy_unit: Option<usize>,
     available_moves: Vec<[usize; 2]>,
     came_from: HashMap<Cell, Cell>,
 }
@@ -114,7 +117,7 @@ async fn main() {
             cam.target.y += delta.y / cam.zoom.y;
         }
 
-        game.update();
+        game.update(&assets);
         game.draw(&assets);
 
         next_frame().await
@@ -122,13 +125,21 @@ async fn main() {
 }
 
 impl Game {
-    fn update(&mut self) {
+    fn update(&mut self, assets: &assets::Assets) {
         // check for hovered unit
         self.hovering_unit = None;
+        self.hovering_enemy_unit = None;
+
         for (i, unit) in self.units.iter().enumerate() {
             let pos = unit.view_pos;
             if self.mouse_in_pos(pos) {
                 self.hovering_unit = Some(i);
+            }
+        }
+        for (i, unit) in self.enemy_units.iter().enumerate() {
+            let pos = unit.view_pos;
+            if self.mouse_in_pos(pos) {
+                self.hovering_enemy_unit = Some(i);
             }
         }
 
@@ -142,7 +153,7 @@ impl Game {
         // check for selected unit
         if is_mouse_button_pressed(MouseButton::Left) {
             if let Some(i) = self.selected_unit {
-                if self.hovering_unit.is_none() {
+                if self.hovering_unit.is_none() && self.hovering_enemy_unit.is_none() {
                     // move selected piece
                     if let Some(cell) = &self.mouse_to_cell() {
                         if self.available_moves.contains(cell) {
@@ -153,6 +164,24 @@ impl Game {
                                 self.units[i].move_path.push(*c);
                             }
                         }
+                    }
+                }
+                if let Some(enemy_i) = self.hovering_enemy_unit {
+                    // attack enemy
+                    let unit = &mut self.units[i];
+                    let enemy = &self.enemy_units[enemy_i];
+                    let [unit_x, unit_y] = unit.game_pos;
+                    let [enemy_x, enemy_y] = enemy.game_pos;
+                    let distance =
+                        ((unit_x + unit_y) as i32 - (enemy_x + enemy_y) as i32).abs() as usize;
+                    if distance <= unit.range {
+                        unit.action = Action::Attack(0.0);
+                        if unit_x > enemy_x {
+                            unit.flip_x = true;
+                        } else {
+                            unit.flip_x = false;
+                        }
+                        // self.enemy_units.remove(enemy_i);
                     }
                 }
             }
@@ -166,6 +195,22 @@ impl Game {
 
         for unit in &mut self.units {
             unit.update_pos(dt);
+            match unit.action {
+                Action::Attack(anim_time) => {
+                    let sprite = unit.sprite(&assets.blue_units);
+                    let frame = anim_time * FPS;
+                    if frame > sprite.frames {
+                        unit.action = Action::Idle;
+                    }
+                }
+                _ => {}
+            }
+            match &mut unit.action {
+                Action::Attack(anim_time) => {
+                    *anim_time += dt;
+                }
+                _ => {}
+            }
         }
 
         for unit in &mut self.enemy_units {
@@ -182,7 +227,7 @@ impl Game {
                     assets
                         .terrain
                         .water
-                        .draw(self.total_frame_time, px, py, false);
+                        .draw(self.total_frame_time, px, py, false, false);
                     continue;
                 }
                 let (c, r) = pick_tile(&self.grass, x as i32, y as i32);
@@ -210,37 +255,37 @@ impl Game {
                     assets
                         .terrain
                         .cloud1
-                        .draw(self.total_frame_time, px, py, false);
+                        .draw(self.total_frame_time, px, py, false, false);
                 }
                 if x == 13 && y == 4 {
                     assets
                         .terrain
                         .cloud2
-                        .draw(self.total_frame_time, px, py, false);
+                        .draw(self.total_frame_time, px, py, false, false);
                 }
                 if x == 20 && y == 4 {
                     assets
                         .terrain
                         .cloud3
-                        .draw(self.total_frame_time, px, py, false);
+                        .draw(self.total_frame_time, px, py, false, false);
                 }
                 if x == 20 && y == 4 {
                     assets
                         .terrain
                         .cloud4
-                        .draw(self.total_frame_time, px, py, false);
+                        .draw(self.total_frame_time, px, py, false, false);
                 }
                 if x == 10 && y == 10 {
                     assets
                         .terrain
                         .tree1
-                        .draw(self.total_frame_time, px, py, false);
+                        .draw(self.total_frame_time, px, py, false, false);
                 }
                 if x == 20 && y == 12 {
                     assets
                         .terrain
                         .tree1
-                        .draw(self.total_frame_time, px, py, false);
+                        .draw(self.total_frame_time, px, py, false, false);
                 }
             }
         }
@@ -272,6 +317,16 @@ impl Game {
                         SELECT_MOVE_COLOR,
                     );
                 }
+            }
+            if let Some(enemy_i) = self.hovering_enemy_unit {
+                let enemy = &self.enemy_units[enemy_i];
+                draw_rectangle(
+                    enemy.view_pos.x,
+                    enemy.view_pos.y,
+                    SQUARE_SIZE,
+                    SQUARE_SIZE,
+                    RED_HOVER_COLOR,
+                );
             }
         }
 
@@ -331,43 +386,59 @@ impl Unit {
         {
             self.game_pos = cell;
         }
-        let target_pos = vec2(
-            self.game_pos[0] as f32 * SQUARE_SIZE,
-            self.game_pos[1] as f32 * SQUARE_SIZE,
-        );
+        match self.action {
+            Action::Idle | Action::Run => {
+                let target_pos = vec2(
+                    self.game_pos[0] as f32 * SQUARE_SIZE,
+                    self.game_pos[1] as f32 * SQUARE_SIZE,
+                );
 
-        let to_target = target_pos - self.view_pos;
-        let step = self.speed * dt;
+                let to_target = target_pos - self.view_pos;
+                let step = self.speed * dt;
 
-        if to_target.length() <= step {
-            self.action = Action::Idle;
-            self.view_pos = target_pos;
-        } else {
-            self.action = Action::Run;
-            let dir = to_target.normalize();
-            self.view_pos += dir * step;
-            if dir.x != 0.0 {
-                self.flip_x = dir.x < 0.0; // face the direction of travel
+                if to_target.length() <= step {
+                    self.action = Action::Idle;
+                    self.view_pos = target_pos;
+                } else {
+                    self.action = Action::Run;
+                    let dir = to_target.normalize();
+                    self.view_pos += dir * step;
+                    if dir.x != 0.0 {
+                        self.flip_x = dir.x < 0.0; // face the direction of travel
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn draw(&self, t: f32, units: &assets::Units) {
+        match self.action {
+            Action::Attack(anim_time) => {
+                self.sprite(units).draw(
+                    anim_time,
+                    self.view_pos.x,
+                    self.view_pos.y,
+                    self.flip_x,
+                    true,
+                );
+            }
+            _ => {
+                self.sprite(units)
+                    .draw(t, self.view_pos.x, self.view_pos.y, self.flip_x, false);
             }
         }
     }
-    fn draw(&self, t: f32, units: &assets::Units) {
+
+    fn sprite<'b>(&self, units: &'b assets::Units) -> &'b assets::Sprite {
         let unit_kind = match self.unit_kind {
             UnitKind::Warrior => &units.warrior,
             UnitKind::Archer => &units.archer,
         };
         match self.action {
-            Action::Idle => unit_kind
-                .idle
-                .draw(t, self.view_pos.x, self.view_pos.y, self.flip_x),
-            Action::Run => unit_kind
-                .run
-                .draw(t, self.view_pos.x, self.view_pos.y, self.flip_x),
-            Action::Attack => {
-                unit_kind
-                    .attack
-                    .draw(t, self.view_pos.x, self.view_pos.y, self.flip_x)
-            }
+            Action::Idle => &unit_kind.idle,
+            Action::Run => &unit_kind.run,
+            Action::Attack(_) => &unit_kind.attack,
         }
     }
 
@@ -468,6 +539,7 @@ fn new_unit(unit_kind: UnitKind, x: usize, y: usize) -> Unit {
         flip_x: false,
         movement: 5,
         speed: 50.0,
+        range: 1,
         move_path: vec![],
     }
 }
