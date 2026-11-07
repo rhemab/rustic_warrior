@@ -29,7 +29,7 @@ enum UnitKind {
 enum Action {
     Idle,
     Run,
-    Attack(f32), // attack hold total animation time
+    Attack((f32, usize)), // attack hold total animation time and enemy idx
 }
 
 #[derive(Debug, Clone)]
@@ -38,11 +38,16 @@ struct Unit {
     action: Action,
     game_pos: [usize; 2],
     view_pos: Vec2,
+    move_path: Vec<Cell>,
     flip_x: bool,
     movement: usize,
     speed: f32,
     range: usize,
-    move_path: Vec<Cell>,
+    max_health: f32,
+    health: f32,
+    attack: f32,
+    last_dmg_taken: f32,
+    show_dmg_taken: f32,
 }
 
 #[derive(Default)]
@@ -169,19 +174,18 @@ impl Game {
                 if let Some(enemy_i) = self.hovering_enemy_unit {
                     // attack enemy
                     let unit = &mut self.units[i];
-                    let enemy = &self.enemy_units[enemy_i];
+                    let enemy = &mut self.enemy_units[enemy_i];
                     let [unit_x, unit_y] = unit.game_pos;
                     let [enemy_x, enemy_y] = enemy.game_pos;
                     let distance =
                         ((unit_x + unit_y) as i32 - (enemy_x + enemy_y) as i32).abs() as usize;
                     if distance <= unit.range {
-                        unit.action = Action::Attack(0.0);
+                        unit.action = Action::Attack((0.0, enemy_i));
                         if unit_x > enemy_x {
                             unit.flip_x = true;
                         } else {
                             unit.flip_x = false;
                         }
-                        // self.enemy_units.remove(enemy_i);
                     }
                 }
             }
@@ -196,17 +200,25 @@ impl Game {
         for unit in &mut self.units {
             unit.update_pos(dt);
             match unit.action {
-                Action::Attack(anim_time) => {
+                Action::Attack((anim_time, enemy_i)) => {
                     let sprite = unit.sprite(&assets.blue_units);
                     let frame = anim_time * FPS;
                     if frame > sprite.frames {
                         unit.action = Action::Idle;
+                        // update health & despawn after the animation finishes
+                        let enemy = &mut self.enemy_units[enemy_i];
+                        enemy.health -= unit.attack;
+                        enemy.show_dmg_taken = 2.0;
+                        enemy.last_dmg_taken = unit.attack;
+                        if enemy.health <= 0.0 {
+                            self.enemy_units.remove(enemy_i);
+                        }
                     }
                 }
                 _ => {}
             }
             match &mut unit.action {
-                Action::Attack(anim_time) => {
+                Action::Attack((anim_time, _)) => {
                     *anim_time += dt;
                 }
                 _ => {}
@@ -215,6 +227,9 @@ impl Game {
 
         for unit in &mut self.enemy_units {
             unit.update_pos(dt);
+            if unit.show_dmg_taken > 0.0 {
+                unit.show_dmg_taken -= dt;
+            }
         }
     }
     fn draw(&self, assets: &assets::Assets) {
@@ -414,7 +429,7 @@ impl Unit {
 
     fn draw(&self, t: f32, units: &assets::Units) {
         match self.action {
-            Action::Attack(anim_time) => {
+            Action::Attack((anim_time, _)) => {
                 self.sprite(units).draw(
                     anim_time,
                     self.view_pos.x,
@@ -427,6 +442,25 @@ impl Unit {
                 self.sprite(units)
                     .draw(t, self.view_pos.x, self.view_pos.y, self.flip_x, false);
             }
+        }
+
+        // draw health bar
+        let offset = 5.0;
+        let x = self.view_pos.x + offset;
+        let y = self.view_pos.y + SQUARE_SIZE;
+        let max_width = SQUARE_SIZE - (offset * 2.0);
+        let width = (self.health * max_width) / self.max_health;
+        if self.health < self.max_health {
+            draw_line(x, y, x + width, y, 2.0, RED);
+        }
+
+        // show dammage taken
+        if self.show_dmg_taken > 0.0 {
+            let txt = format!("-{}", self.last_dmg_taken);
+            let offset = SQUARE_SIZE / 2.0;
+            let x = self.view_pos.x + offset;
+            let y = self.view_pos.y;
+            draw_text(txt, x, y, 20.0, RED);
         }
     }
 
@@ -536,10 +570,15 @@ fn new_unit(unit_kind: UnitKind, x: usize, y: usize) -> Unit {
         action: Action::Idle,
         game_pos: [x, y],
         view_pos: vec2(x as f32 * SQUARE_SIZE, y as f32 * SQUARE_SIZE),
+        move_path: vec![],
         flip_x: false,
         movement: 5,
         speed: 50.0,
         range: 1,
-        move_path: vec![],
+        max_health: 100.0,
+        health: 100.0,
+        attack: 50.0,
+        last_dmg_taken: 0.0,
+        show_dmg_taken: 0.0,
     }
 }
