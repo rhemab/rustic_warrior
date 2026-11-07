@@ -10,7 +10,8 @@ const NUM_SQUARES: usize = 30;
 pub const FPS: f32 = 10.0;
 
 const HOVER_COLOR: Color = Color::from_rgba(255, 255, 255, 64);
-const MOVEMENT_COLOR: Color = Color::from_rgba(255, 255, 255, 80);
+const AVAILABLE_MOVES_COLOR: Color = Color::from_rgba(255, 255, 255, 80);
+const SELECT_MOVE_COLOR: Color = Color::from_rgba(255, 255, 255, 200);
 
 pub const TILEMAP: &[u8] =
     include_bytes!("../assets/tiny_swords/Terrain/Tileset/Tilemap_color1.png");
@@ -51,12 +52,12 @@ struct Game {
     total_frame_time: f32,
     hovering_unit: Option<usize>,
     available_moves: Vec<[usize; 2]>,
+    came_from: HashMap<Cell, Cell>,
 }
 
 #[macroquad::main("Rustic Warrior")]
 async fn main() {
-    // set_fullscreen(true);
-    request_new_screen_size(2000.0, 2000.0);
+    set_fullscreen(true);
 
     let blue_units = assets::Units::new_blue();
     let red_units = assets::Units::new_red();
@@ -125,32 +126,38 @@ impl Game {
         self.hovering_unit = None;
         for (i, unit) in self.units.iter().enumerate() {
             let pos = unit.view_pos;
-            if self.mouse_in(pos) {
+            if self.mouse_in_pos(pos) {
                 self.hovering_unit = Some(i);
             }
         }
 
         if let Some(i) = self.selected_unit {
-            let unit = &self.units[i];
-            self.available_moves = unit.get_available_moves(&self);
+            if self.available_moves.is_empty() {
+                let unit = &self.units[i];
+                (self.available_moves, self.came_from) = unit.get_available_moves(&self);
+            }
         }
 
         // check for selected unit
         if is_mouse_button_pressed(MouseButton::Left) {
             if let Some(i) = self.selected_unit {
                 if self.hovering_unit.is_none() {
+                    // trying to move selected peice
                     for game_pos in &self.available_moves {
                         let pos = vec2(
                             game_pos[0] as f32 * SQUARE_SIZE,
                             game_pos[1] as f32 * SQUARE_SIZE,
                         );
-                        if self.mouse_in(pos) {
+                        if self.mouse_in_pos(pos) {
                             self.units[i].game_pos = *game_pos;
                         }
                     }
                 }
             }
+            // set selected unit
             self.selected_unit = self.hovering_unit;
+            self.available_moves.clear();
+            self.came_from.clear();
         }
 
         let dt = get_frame_time();
@@ -243,11 +250,26 @@ impl Game {
                     game_pos[0] as f32 * SQUARE_SIZE,
                     game_pos[1] as f32 * SQUARE_SIZE,
                 );
-                let mut color = MOVEMENT_COLOR;
-                if self.mouse_in(pos) {
-                    color = Color::from_rgba(255, 255, 255, 200);
+                let mut color = AVAILABLE_MOVES_COLOR;
+                if self.mouse_in_pos(pos) {
+                    color = SELECT_MOVE_COLOR;
                 }
                 draw_rectangle(pos.x, pos.y, SQUARE_SIZE - 1.0, SQUARE_SIZE - 1.0, color);
+            }
+
+            if let Some(mouse_cell) = self.mouse_to_cell() {
+                let mut c = &mouse_cell;
+                while let Some(cell) = &self.came_from.get(c) {
+                    c = *cell;
+                    let pos = vec2(cell[0] as f32 * SQUARE_SIZE, cell[1] as f32 * SQUARE_SIZE);
+                    draw_rectangle(
+                        pos.x,
+                        pos.y,
+                        SQUARE_SIZE - 1.0,
+                        SQUARE_SIZE - 1.0,
+                        SELECT_MOVE_COLOR,
+                    );
+                }
             }
         }
 
@@ -273,7 +295,7 @@ impl Game {
         }
     }
 
-    fn mouse_in(&self, pos: Vec2) -> bool {
+    fn mouse_in_pos(&self, pos: Vec2) -> bool {
         let x_max = pos.x + SQUARE_SIZE;
         let y_max = pos.y + SQUARE_SIZE;
 
@@ -284,6 +306,19 @@ impl Game {
         }
 
         false
+    }
+
+    fn mouse_to_cell(&self) -> Option<Cell> {
+        let x = self.mouse_pos.x / SQUARE_SIZE;
+        let y = self.mouse_pos.y / SQUARE_SIZE;
+
+        if x >= 0.0 && x <= SQUARE_SIZE * NUM_SQUARES as f32 {
+            if y >= 0.0 && y <= SQUARE_SIZE * NUM_SQUARES as f32 {
+                return Some([x as usize, y as usize]);
+            }
+        }
+
+        None
     }
 }
 
@@ -329,12 +364,10 @@ impl Unit {
         }
     }
 
-    fn get_available_moves(&self, game: &Game) -> Vec<Cell> {
+    fn get_available_moves(&self, game: &Game) -> (Vec<Cell>, HashMap<Cell, Cell>) {
         let mut available_moves = vec![];
         let x = self.game_pos[0];
         let y = self.game_pos[1];
-
-        let mut visited = vec![];
 
         let mut came_from: HashMap<Cell, Cell> = HashMap::new();
         let mut dist: HashMap<Cell, usize> = HashMap::new();
@@ -344,29 +377,11 @@ impl Unit {
         q.push_back(root);
 
         while let Some(pos) = q.pop_front() {
-            if pos != root {
-                if visited.contains(&pos) {
-                    continue;
-                }
-                let occupied = game.units.iter().find(|u| u.game_pos == pos).is_some()
-                    || game
-                        .enemy_units
-                        .iter()
-                        .find(|u| u.game_pos == pos)
-                        .is_some();
-                if occupied {
-                    continue;
-                }
+            let d = dist[&pos];
+            if d > self.movement {
+                continue;
             }
-
-            visited.push(pos);
-
-            if let Some(d) = dist.get(&pos) {
-                if *d > self.movement {
-                    continue;
-                }
-                available_moves.push(pos);
-            }
+            available_moves.push(pos);
 
             let next_positions = [
                 [pos[0], pos[1] + 1],               // up
@@ -379,16 +394,26 @@ impl Unit {
                 next_pos[0] = next_pos[0].clamp(0, NUM_SQUARES - 1);
                 next_pos[1] = next_pos[1].clamp(0, NUM_SQUARES - 1);
 
-                if let Some(d) = dist.get(&pos) {
-                    dist.insert(next_pos, d + 1);
+                if dist.contains_key(&next_pos) {
+                    continue;
+                }
+                let occupied = game.units.iter().find(|u| u.game_pos == next_pos).is_some()
+                    || game
+                        .enemy_units
+                        .iter()
+                        .find(|u| u.game_pos == next_pos)
+                        .is_some();
+                if occupied {
+                    continue;
                 }
 
-                came_from.insert(pos, next_pos);
+                dist.insert(next_pos, d + 1);
+                came_from.insert(next_pos, pos);
                 q.push_back(next_pos);
             }
         }
 
-        available_moves
+        (available_moves, came_from)
     }
 }
 
