@@ -202,7 +202,7 @@ impl Game {
 
         let dt = get_frame_time();
 
-        for unit in &mut self.units {
+        for (i, unit) in self.units.iter_mut().enumerate() {
             unit.update_pos(dt);
             match unit.action {
                 Action::Attack((anim_time, enemy_i)) => {
@@ -212,12 +212,55 @@ impl Game {
                         unit.action = Action::Idle;
                         // update health/despawn after the animation finishes
                         let enemy = &mut self.enemy_units[enemy_i];
-                        let dmg = unit.attack - enemy.defense;
+                        let dmg = (unit.attack - enemy.defense).max(0.0);
                         enemy.health -= dmg;
-                        enemy.show_dmg_taken = 2.0;
+                        enemy.show_dmg_taken = 1.0;
                         enemy.last_dmg_taken = dmg;
                         if enemy.health <= 0.0 {
                             self.enemy_units.remove(enemy_i);
+                            self.hovering_enemy_unit = None;
+                        } else {
+                            // if in range, counter attack
+                            if enemy.enemy_in_range(unit) {
+                                enemy.action = Action::Attack((0.0, i));
+                                if enemy.game_pos[0] > unit.game_pos[0] {
+                                    enemy.flip_x = true;
+                                } else {
+                                    enemy.flip_x = false;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            match &mut unit.action {
+                Action::Attack((anim_time, _)) => {
+                    *anim_time += dt;
+                }
+                _ => {}
+            }
+            if unit.show_dmg_taken > 0.0 {
+                unit.show_dmg_taken -= dt;
+            }
+        }
+
+        for unit in &mut self.enemy_units {
+            unit.update_pos(dt);
+            match unit.action {
+                Action::Attack((anim_time, enemy_i)) => {
+                    let sprite = unit.sprite(&assets.blue_units);
+                    let frame = anim_time * FPS;
+                    if frame > sprite.frames {
+                        unit.action = Action::Idle;
+                        // update health/despawn after the animation finishes
+                        let enemy = &mut self.units[enemy_i];
+                        let dmg = (unit.attack - enemy.defense).max(0.0);
+                        enemy.health -= dmg;
+                        enemy.show_dmg_taken = 1.0;
+                        enemy.last_dmg_taken = dmg;
+                        if enemy.health <= 0.0 {
+                            self.units.remove(enemy_i);
                             self.hovering_enemy_unit = None;
                         }
                     }
@@ -230,10 +273,6 @@ impl Game {
                 }
                 _ => {}
             }
-        }
-
-        for unit in &mut self.enemy_units {
-            unit.update_pos(dt);
             if unit.show_dmg_taken > 0.0 {
                 unit.show_dmg_taken -= dt;
             }
