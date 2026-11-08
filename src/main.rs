@@ -91,11 +91,15 @@ async fn main() {
         let x = 12;
         let y = 12;
 
-        let warrior = new_unit("Erik".to_string(), UnitKind::Warrior, x, y);
-        game.units.push(warrior);
+        let erik = new_unit("Erik".to_string(), UnitKind::Warrior, x, y);
+        game.units.push(erik);
+        let lance = new_unit("Lance".to_string(), UnitKind::Archer, x - 1, y);
+        game.units.push(lance);
 
-        let enemy_archer = new_unit("Enemy".to_string(), UnitKind::Archer, x + 1, y);
+        let enemy_archer = new_unit("Enemy".to_string(), UnitKind::Archer, x + 2, y);
         game.enemy_units.push(enemy_archer);
+        let enemy_warrior = new_unit("Enemy".to_string(), UnitKind::Warrior, x + 1, y);
+        game.enemy_units.push(enemy_warrior);
     }
 
     let mut cam = Camera2D::default();
@@ -205,7 +209,7 @@ impl Game {
                     let frame = anim_time * FPS;
                     if frame > sprite.frames {
                         unit.action = Action::Idle;
-                        // update health & despawn after the animation finishes
+                        // update health/despawn after the animation finishes
                         let enemy = &mut self.enemy_units[enemy_i];
                         enemy.health -= unit.attack;
                         enemy.show_dmg_taken = 2.0;
@@ -307,7 +311,8 @@ impl Game {
         }
 
         // show available moves for selected unit
-        if let Some(_) = self.selected_unit {
+        if let Some(i) = self.selected_unit {
+            let unit = &self.units[i];
             for game_pos in &self.available_moves {
                 let pos = vec2(
                     game_pos[0] as f32 * SQUARE_SIZE,
@@ -336,13 +341,15 @@ impl Game {
             }
             if let Some(enemy_i) = self.hovering_enemy_unit {
                 let enemy = &self.enemy_units[enemy_i];
-                draw_rectangle(
-                    enemy.view_pos.x,
-                    enemy.view_pos.y,
-                    SQUARE_SIZE,
-                    SQUARE_SIZE,
-                    RED_HOVER_COLOR,
-                );
+                if unit.enemy_in_range(enemy) {
+                    draw_rectangle(
+                        enemy.view_pos.x,
+                        enemy.view_pos.y,
+                        SQUARE_SIZE,
+                        SQUARE_SIZE,
+                        RED_HOVER_COLOR,
+                    );
+                }
             }
         }
 
@@ -439,6 +446,16 @@ impl Game {
 }
 
 impl Unit {
+    fn enemy_in_range(&self, enemy: &Unit) -> bool {
+        let [unit_x, unit_y] = self.game_pos;
+        let [enemy_x, enemy_y] = enemy.game_pos;
+        let distance = ((unit_x + unit_y) as i32 - (enemy_x + enemy_y) as i32).abs() as usize;
+        if distance <= self.range {
+            return true;
+        }
+
+        false
+    }
     fn update_pos(&mut self, dt: f32) {
         if self.action == Action::Idle
             && let Some(cell) = self.move_path.pop()
