@@ -183,16 +183,12 @@ impl Game {
                     // attack enemy
                     let unit = &mut self.units[i];
                     let enemy = &mut self.enemy_units[enemy_i];
-                    let [unit_x, unit_y] = unit.game_pos;
-                    let [enemy_x, enemy_y] = enemy.game_pos;
-                    let distance =
-                        ((unit_x + unit_y) as i32 - (enemy_x + enemy_y) as i32).abs() as usize;
-                    if distance <= unit.range {
+                    if unit.enemy_in_range(enemy) {
                         unit.action = Action::Attack((0.0, enemy_i));
-                        if unit_x > enemy_x {
-                            unit.flip_x = true;
+                        if enemy.game_pos[0] > unit.game_pos[0] {
+                            enemy.flip_x = true;
                         } else {
-                            unit.flip_x = false;
+                            enemy.flip_x = false;
                         }
                     }
                 }
@@ -535,7 +531,9 @@ impl Unit {
     fn enemy_in_range(&self, enemy: &Unit) -> bool {
         let [unit_x, unit_y] = self.game_pos;
         let [enemy_x, enemy_y] = enemy.game_pos;
-        let distance = ((unit_x + unit_y) as i32 - (enemy_x + enemy_y) as i32).abs() as usize;
+        let x_diff = unit_x.abs_diff(enemy_x);
+        let y_diff = unit_y.abs_diff(enemy_y);
+        let distance = x_diff + y_diff;
         if distance <= self.range {
             return true;
         }
