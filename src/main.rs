@@ -47,6 +47,7 @@ struct Unit {
     max_health: f32,
     health: f32,
     attack: f32,
+    defense: f32,
     last_dmg_taken: f32,
     show_dmg_taken: f32,
 }
@@ -211,9 +212,10 @@ impl Game {
                         unit.action = Action::Idle;
                         // update health/despawn after the animation finishes
                         let enemy = &mut self.enemy_units[enemy_i];
-                        enemy.health -= unit.attack;
+                        let dmg = unit.attack - enemy.defense;
+                        enemy.health -= dmg;
                         enemy.show_dmg_taken = 2.0;
-                        enemy.last_dmg_taken = unit.attack;
+                        enemy.last_dmg_taken = dmg;
                         if enemy.health <= 0.0 {
                             self.enemy_units.remove(enemy_i);
                             self.hovering_enemy_unit = None;
@@ -410,8 +412,8 @@ impl Game {
             let x = margin;
             let y = screen_height() - h - margin;
             let txt = format!(
-                "{}\nHealth: {}/{}\nAttack: {}\nRange: {}\nMove: {}",
-                u.name, u.health, u.max_health, u.attack, u.range, u.movement
+                "{}\nHealth: {}/{}\nAttack: {}\nDefense: {}\nRange: {}\nMove: {}",
+                u.name, u.health, u.max_health, u.attack, u.defense, u.range, u.movement
             );
             draw_rectangle(x, y, w, h, SELECT_MOVE_COLOR);
             draw_multiline_text(&txt, x + 10.0, y + 35.0, 20.0, None, BLACK);
@@ -631,12 +633,14 @@ fn new_unit(name: String, unit_kind: UnitKind, x: usize, y: usize) -> Unit {
     let mut range = 1;
     let mut max_health = 100.0;
     let mut attack = 50.0;
+    let mut defense = 10.0;
 
     match unit_kind {
         UnitKind::Warrior => {
             movement = 4;
             max_health = 200.0;
             attack = 100.0;
+            defense = 20.0;
         }
         UnitKind::Archer => {
             range = 3;
@@ -658,6 +662,7 @@ fn new_unit(name: String, unit_kind: UnitKind, x: usize, y: usize) -> Unit {
         max_health,
         health: max_health,
         attack,
+        defense,
         last_dmg_taken: 0.0,
         show_dmg_taken: 0.0,
     }
