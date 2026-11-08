@@ -43,6 +43,7 @@ struct Unit {
     flip_x: bool,
     last_dmg_taken: f32,
     show_dmg_taken: f32,
+    show_miss: f32,
     movement: usize,
     speed: f32,
     range: usize,
@@ -228,6 +229,8 @@ impl Game {
                             enemy.health -= dmg;
                             enemy.show_dmg_taken = 1.0;
                             enemy.last_dmg_taken = dmg;
+                        } else {
+                            enemy.show_miss = 1.0;
                         }
 
                         // despawn or counter attack
@@ -258,6 +261,9 @@ impl Game {
             if unit.show_dmg_taken > 0.0 {
                 unit.show_dmg_taken -= dt;
             }
+            if unit.show_miss > 0.0 {
+                unit.show_miss -= dt;
+            }
         }
 
         for unit in &mut self.enemy_units {
@@ -284,6 +290,8 @@ impl Game {
                             enemy.health -= dmg;
                             enemy.show_dmg_taken = 1.0;
                             enemy.last_dmg_taken = dmg;
+                        } else {
+                            enemy.show_miss = 1.0;
                         }
 
                         if enemy.health <= 0.0 {
@@ -302,6 +310,9 @@ impl Game {
             }
             if unit.show_dmg_taken > 0.0 {
                 unit.show_dmg_taken -= dt;
+            }
+            if unit.show_miss > 0.0 {
+                unit.show_miss -= dt;
             }
         }
     }
@@ -590,13 +601,21 @@ impl Unit {
             draw_line(x, y, x + width, y, 2.0, RED);
         }
 
-        // show dammage taken
+        // show damage taken
         if self.show_dmg_taken > 0.0 {
             let txt = format!("-{}", self.last_dmg_taken);
             let offset = SQUARE_SIZE / 2.0;
             let x = self.view_pos.x + offset;
             let y = self.view_pos.y;
             draw_text(txt, x, y, 20.0, RED);
+        }
+
+        // show miss
+        if self.show_miss > 0.0 {
+            let offset = SQUARE_SIZE / 2.0;
+            let x = self.view_pos.x + offset;
+            let y = self.view_pos.y;
+            draw_text("MISS", x, y, 20.0, RED);
         }
     }
 
@@ -733,6 +752,7 @@ fn new_unit(name: String, unit_kind: UnitKind, x: usize, y: usize) -> Unit {
         flip_x: false,
         last_dmg_taken: 0.0,
         show_dmg_taken: 0.0,
+        show_miss: 0.0,
         movement,
         speed,
         range,
