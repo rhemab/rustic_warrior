@@ -34,6 +34,7 @@ enum Action {
 
 #[derive(Debug, Clone)]
 struct Unit {
+    name: String,
     unit_kind: UnitKind,
     action: Action,
     game_pos: [usize; 2],
@@ -90,14 +91,12 @@ async fn main() {
         let x = 12;
         let y = 12;
 
-        let warrior = new_unit(UnitKind::Warrior, x, y);
+        let warrior = new_unit("Erik".to_string(), UnitKind::Warrior, x, y);
         game.units.push(warrior);
 
-        let enemy_archer = new_unit(UnitKind::Archer, x + 1, y);
+        let enemy_archer = new_unit("Enemy".to_string(), UnitKind::Archer, x + 1, y);
         game.enemy_units.push(enemy_archer);
     }
-
-    // let mut available_moves: Vec<[usize; 2]> = vec![];
 
     let mut cam = Camera2D::default();
     cam.target = vec2(NUM_SQUARES as f32 * SQUARE_SIZE / 2.0, 600.0);
@@ -124,6 +123,7 @@ async fn main() {
 
         game.update(&assets);
         game.draw(&assets);
+        game.draw_ui();
 
         next_frame().await
     }
@@ -212,6 +212,7 @@ impl Game {
                         enemy.last_dmg_taken = unit.attack;
                         if enemy.health <= 0.0 {
                             self.enemy_units.remove(enemy_i);
+                            self.hovering_enemy_unit = None;
                         }
                     }
                 }
@@ -358,12 +359,55 @@ impl Game {
         }
 
         // draw units last
-        for unit in &self.units {
-            unit.draw(self.total_frame_time, &assets.blue_units);
+        for (i, unit) in self.units.iter().enumerate() {
+            let mut hovered = false;
+            if let Some(idx) = self.hovering_unit {
+                if idx == i {
+                    hovered = true;
+                }
+            }
+            unit.draw(self.total_frame_time, hovered, &assets.blue_units);
         }
 
-        for unit in &self.enemy_units {
-            unit.draw(self.total_frame_time, &assets.red_units);
+        for (i, unit) in self.enemy_units.iter().enumerate() {
+            let mut hovered = false;
+            if let Some(idx) = self.hovering_enemy_unit {
+                if idx == i {
+                    hovered = true;
+                }
+            }
+            unit.draw(self.total_frame_time, hovered, &assets.red_units);
+        }
+    }
+
+    fn draw_ui(&self) {
+        set_default_camera();
+        let mut unit = None;
+
+        // draw hovered unit stats
+        if let Some(i) = self.hovering_unit {
+            unit = Some(&self.units[i]);
+        }
+        if let Some(i) = self.selected_unit {
+            unit = Some(&self.units[i]);
+        }
+        if let Some(i) = self.hovering_enemy_unit {
+            unit = Some(&self.enemy_units[i]);
+        }
+
+        if let Some(u) = unit {
+            let margin = 0.0;
+            let w = 200.0;
+            let h = 150.0;
+
+            let x = margin;
+            let y = screen_height() - h - margin;
+            let txt = format!(
+                "{}\nHealth: {}/{}\nAttack: {}\nRange: {}\nMove: {}",
+                u.name, u.health, u.max_health, u.attack, u.range, u.movement
+            );
+            draw_rectangle(x, y, w, h, SELECT_MOVE_COLOR);
+            draw_multiline_text(&txt, x + 10.0, y + 35.0, 20.0, None, BLACK);
         }
     }
 
@@ -427,7 +471,7 @@ impl Unit {
         }
     }
 
-    fn draw(&self, t: f32, units: &assets::Units) {
+    fn draw(&self, t: f32, _hovered: bool, units: &assets::Units) {
         match self.action {
             Action::Attack((anim_time, _)) => {
                 self.sprite(units).draw(
@@ -564,20 +608,39 @@ fn pick_tile(map: &Vec<Vec<bool>>, x: i32, y: i32) -> (usize, usize) {
     (col, row)
 }
 
-fn new_unit(unit_kind: UnitKind, x: usize, y: usize) -> Unit {
+fn new_unit(name: String, unit_kind: UnitKind, x: usize, y: usize) -> Unit {
+    let mut movement = 5;
+    let mut speed = 50.0;
+    let mut range = 1;
+    let mut max_health = 100.0;
+    let mut attack = 50.0;
+
+    match unit_kind {
+        UnitKind::Warrior => {
+            movement = 4;
+            max_health = 200.0;
+            attack = 100.0;
+        }
+        UnitKind::Archer => {
+            range = 3;
+            speed = 75.0;
+        }
+    }
+
     Unit {
+        name,
         unit_kind,
         action: Action::Idle,
         game_pos: [x, y],
         view_pos: vec2(x as f32 * SQUARE_SIZE, y as f32 * SQUARE_SIZE),
         move_path: vec![],
         flip_x: false,
-        movement: 5,
-        speed: 50.0,
-        range: 1,
-        max_health: 100.0,
-        health: 100.0,
-        attack: 50.0,
+        movement,
+        speed,
+        range,
+        max_health,
+        health: max_health,
+        attack,
         last_dmg_taken: 0.0,
         show_dmg_taken: 0.0,
     }
