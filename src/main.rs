@@ -41,6 +41,8 @@ struct Unit {
     view_pos: Vec2,
     move_path: Vec<Cell>,
     flip_x: bool,
+    last_dmg_taken: f32,
+    show_dmg_taken: f32,
     movement: usize,
     speed: f32,
     range: usize,
@@ -48,8 +50,7 @@ struct Unit {
     health: f32,
     attack: f32,
     defense: f32,
-    last_dmg_taken: f32,
-    show_dmg_taken: f32,
+    accuracy: f32,
 }
 
 #[derive(Default)]
@@ -64,6 +65,7 @@ struct Game {
     hovering_enemy_unit: Option<usize>,
     available_moves: Vec<[usize; 2]>,
     came_from: HashMap<Cell, Cell>,
+    hit_chance: f32,
 }
 
 #[macroquad::main("Rustic Warrior")]
@@ -210,12 +212,25 @@ impl Game {
                     let frame = anim_time * FPS;
                     if frame > sprite.frames {
                         unit.action = Action::Idle;
-                        // update health/despawn after the animation finishes
+                        // check hit_chance
+                        let mut hit = false;
+                        self.hit_chance += unit.accuracy;
+                        if self.hit_chance >= 100.0 {
+                            hit = true;
+                            self.hit_chance -= 100.0;
+                        }
+
                         let enemy = &mut self.enemy_units[enemy_i];
-                        let dmg = (unit.attack - enemy.defense).max(0.0);
-                        enemy.health -= dmg;
-                        enemy.show_dmg_taken = 1.0;
-                        enemy.last_dmg_taken = dmg;
+
+                        if hit {
+                            // update health/despawn after the animation finishes
+                            let dmg = (unit.attack - enemy.defense).max(0.0);
+                            enemy.health -= dmg;
+                            enemy.show_dmg_taken = 1.0;
+                            enemy.last_dmg_taken = dmg;
+                        }
+
+                        // despawn or counter attack
                         if enemy.health <= 0.0 {
                             self.enemy_units.remove(enemy_i);
                             self.hovering_enemy_unit = None;
@@ -253,12 +268,24 @@ impl Game {
                     let frame = anim_time * FPS;
                     if frame > sprite.frames {
                         unit.action = Action::Idle;
+                        // check hit_chance
+                        let mut hit = false;
+                        self.hit_chance += unit.accuracy;
+                        if self.hit_chance >= 100.0 {
+                            hit = true;
+                            self.hit_chance -= 100.0;
+                        }
+
                         // update health/despawn after the animation finishes
                         let enemy = &mut self.units[enemy_i];
-                        let dmg = (unit.attack - enemy.defense).max(0.0);
-                        enemy.health -= dmg;
-                        enemy.show_dmg_taken = 1.0;
-                        enemy.last_dmg_taken = dmg;
+
+                        if hit {
+                            let dmg = (unit.attack - enemy.defense).max(0.0);
+                            enemy.health -= dmg;
+                            enemy.show_dmg_taken = 1.0;
+                            enemy.last_dmg_taken = dmg;
+                        }
+
                         if enemy.health <= 0.0 {
                             self.units.remove(enemy_i);
                             self.hovering_enemy_unit = None;
@@ -451,8 +478,15 @@ impl Game {
             let x = margin;
             let y = screen_height() - h - margin;
             let txt = format!(
-                "{}\nHealth: {}/{}\nAttack: {}\nDefense: {}\nRange: {}\nMove: {}",
-                u.name, u.health, u.max_health, u.attack, u.defense, u.range, u.movement
+                "{}\nHealth: {}/{}\nAttack: {}\nDefense: {}\nRange: {}\nAccuracy: {}\nMove: {}",
+                u.name,
+                u.health,
+                u.max_health,
+                u.attack,
+                u.defense,
+                u.range,
+                u.accuracy,
+                u.movement
             );
             draw_rectangle(x, y, w, h, SELECT_MOVE_COLOR);
             draw_multiline_text(&txt, x + 10.0, y + 35.0, 20.0, None, BLACK);
@@ -673,6 +707,7 @@ fn new_unit(name: String, unit_kind: UnitKind, x: usize, y: usize) -> Unit {
     let mut max_health = 100.0;
     let mut attack = 50.0;
     let mut defense = 10.0;
+    let mut accuracy = 70.0;
 
     match unit_kind {
         UnitKind::Warrior => {
@@ -684,6 +719,7 @@ fn new_unit(name: String, unit_kind: UnitKind, x: usize, y: usize) -> Unit {
         UnitKind::Archer => {
             range = 3;
             speed = 75.0;
+            accuracy = 90.0;
         }
     }
 
@@ -695,6 +731,8 @@ fn new_unit(name: String, unit_kind: UnitKind, x: usize, y: usize) -> Unit {
         view_pos: vec2(x as f32 * SQUARE_SIZE, y as f32 * SQUARE_SIZE),
         move_path: vec![],
         flip_x: false,
+        last_dmg_taken: 0.0,
+        show_dmg_taken: 0.0,
         movement,
         speed,
         range,
@@ -702,7 +740,6 @@ fn new_unit(name: String, unit_kind: UnitKind, x: usize, y: usize) -> Unit {
         health: max_health,
         attack,
         defense,
-        last_dmg_taken: 0.0,
-        show_dmg_taken: 0.0,
+        accuracy,
     }
 }
