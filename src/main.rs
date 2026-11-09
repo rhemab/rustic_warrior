@@ -114,20 +114,8 @@ async fn main() {
     game.clouds = generate_clouds(&game.grass);
 
     // generate units
-    {
-        let x = 12;
-        let y = 12;
-
-        let erik = new_unit("Erik".to_string(), UnitKind::Warrior, x, y);
-        game.units.push(erik);
-        let lance = new_unit("Lance".to_string(), UnitKind::Archer, x - 1, y);
-        game.units.push(lance);
-
-        let enemy_archer = new_unit("Enemy".to_string(), UnitKind::Archer, x + 2, y);
-        game.enemy_units.push(enemy_archer);
-        let enemy_warrior = new_unit("Enemy".to_string(), UnitKind::Warrior, x + 1, y);
-        game.enemy_units.push(enemy_warrior);
-    }
+    game.units.append(&mut generate_units(&game));
+    game.enemy_units.append(&mut generate_enemy_units(&game));
 
     let mut cam = Camera2D::default();
     cam.target = vec2(NUM_SQUARES as f32 * SQUARE_SIZE / 2.0, 600.0);
@@ -892,11 +880,20 @@ fn new_unit(name: String, unit_kind: UnitKind, x: usize, y: usize) -> Unit {
     }
 }
 
-// 1. Generates an organic, single-mass island
+use std::time::SystemTime;
+
 fn generate_map() -> Vec<Vec<bool>> {
     let mut map = vec![vec![false; NUM_SQUARES]; NUM_SQUARES];
     let center = NUM_SQUARES as f32 / 2.0;
     let base_radius = center * 0.75;
+
+    // Generate random offsets based on current time so the shape changes every time
+    let time_seed = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as f32;
+    let offset_x = (time_seed * 0.0001).sin() * 10.0;
+    let offset_y = (time_seed * 0.0001).cos() * 10.0;
 
     for y in 0..NUM_SQUARES {
         for x in 0..NUM_SQUARES {
@@ -909,8 +906,8 @@ fn generate_map() -> Vec<Vec<bool>> {
                 continue;
             }
 
-            let nx = x as f32 / NUM_SQUARES as f32 * 6.0;
-            let ny = y as f32 / NUM_SQUARES as f32 * 6.0;
+            let nx = (x as f32 / NUM_SQUARES as f32 * 6.0) + offset_x;
+            let ny = (y as f32 / NUM_SQUARES as f32 * 6.0) + offset_y;
             let noise = (nx * 3.5 + ny * 2.2).sin() * 6.0 + (nx * 7.1 - ny * 6.4).cos() * 3.0;
             let falloff = 1.0 - norm_dist * norm_dist;
 
@@ -925,18 +922,24 @@ fn generate_map() -> Vec<Vec<bool>> {
 fn generate_trees(map: &[Vec<bool>]) -> Vec<Vec<bool>> {
     let mut trees = vec![vec![false; NUM_SQUARES]; NUM_SQUARES];
 
+    // Unique tree seed per generation call
+    let tree_seed = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u32;
+
     for y in 0..NUM_SQUARES {
         for x in 0..NUM_SQUARES {
-            // Must be land, and account for the 2-tile downward sprite height
             if !map[y][x] || y + 1 >= NUM_SQUARES || !map[y + 1][x] {
                 continue;
             }
 
-            // Pseudo-random integer hash for true, non-patterned scattering
-            let hash = ((x as u32).wrapping_mul(374761393)) ^ ((y as u32).wrapping_mul(668265263));
-            let random_val = hash as f32 / u32::MAX as f32;
+            // Include the tree_seed in the hash so tree positions change every time
+            let hash = ((x as u32).wrapping_mul(374761393))
+                ^ ((y as u32).wrapping_mul(668265263))
+                ^ tree_seed;
+            let random_val = (hash % 1000) as f32 / 1000.0;
 
-            // 3% chance for sparse, natural distribution
             if random_val < 0.03 {
                 trees[y][x] = true;
             }
@@ -966,4 +969,96 @@ fn generate_clouds(map: &[Vec<bool>]) -> Vec<Vec2> {
     }
 
     clouds
+}
+
+fn generate_units(game: &Game) -> Vec<Unit> {
+    let mut units = vec![];
+    let mut left_tiles = vec![];
+
+    let left_limit = (NUM_SQUARES / 4).max(5);
+
+    for y in 0..NUM_SQUARES {
+        for x in 0..left_limit {
+            if game.grass[y][x] {
+                left_tiles.push((x, y));
+            }
+        }
+    }
+
+    let step = if left_tiles.len() >= 10 {
+        left_tiles.len() / 10
+    } else {
+        1
+    };
+    let mut index = 0;
+
+    // Interleaved array containing 5 Warriors and 5 Archers
+    let kinds = [
+        UnitKind::Warrior,
+        UnitKind::Archer,
+        UnitKind::Warrior,
+        UnitKind::Archer,
+        UnitKind::Warrior,
+        UnitKind::Archer,
+        UnitKind::Archer,
+        UnitKind::Warrior,
+        UnitKind::Archer,
+        UnitKind::Warrior,
+    ];
+
+    for kind in kinds {
+        if let Some(&(x, y)) = left_tiles.get(index) {
+            let u = new_unit("Player".to_string(), kind, x, y);
+            units.push(u);
+            index = (index + step) % left_tiles.len();
+        }
+    }
+
+    units
+}
+
+fn generate_enemy_units(game: &Game) -> Vec<Unit> {
+    let mut units = vec![];
+    let mut right_tiles = vec![];
+
+    let right_limit = NUM_SQUARES - (NUM_SQUARES / 4).max(5);
+
+    for y in 0..NUM_SQUARES {
+        for x in right_limit..NUM_SQUARES {
+            if game.grass[y][x] {
+                right_tiles.push((x, y));
+            }
+        }
+    }
+
+    let step = if right_tiles.len() >= 10 {
+        right_tiles.len() / 10
+    } else {
+        1
+    };
+    let mut index = 0;
+
+    let kinds = [
+        UnitKind::Warrior,
+        UnitKind::Archer,
+        UnitKind::Warrior,
+        UnitKind::Archer,
+        UnitKind::Warrior,
+        UnitKind::Archer,
+        UnitKind::Archer,
+        UnitKind::Warrior,
+        UnitKind::Archer,
+        UnitKind::Warrior,
+    ];
+
+    for kind in kinds {
+        if let Some(&(x, y)) = right_tiles.get(index) {
+            let mut u = new_unit("Enemy".to_string(), kind, x, y);
+            u.flip_x = true;
+            units.push(u);
+            index = (index + step) % right_tiles.len();
+        }
+    }
+
+    units
 }
