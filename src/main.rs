@@ -354,16 +354,30 @@ impl Game {
         }
     }
     fn draw(&self, assets: &assets::Assets) {
+        // draw water foam
+        for y in 0..NUM_SQUARES {
+            for x in 0..NUM_SQUARES {
+                let px = x as f32 * SQUARE_SIZE;
+                let py = y as f32 * SQUARE_SIZE;
+                if !self.grass[y][x] {
+                    continue;
+                }
+                let (c, r) = pick_tile(&self.grass, x as i32, y as i32);
+                if c != 1 || r != 1 {
+                    assets
+                        .terrain
+                        .water_foam
+                        .draw(self.total_frame_time, px, py, false, false);
+                }
+            }
+        }
+
         // draw grass
         for y in 0..NUM_SQUARES {
             for x in 0..NUM_SQUARES {
                 let px = x as f32 * SQUARE_SIZE;
                 let py = y as f32 * SQUARE_SIZE;
                 if !self.grass[y][x] {
-                    assets
-                        .terrain
-                        .water
-                        .draw(self.total_frame_time, px, py, false, false);
                     continue;
                 }
                 let (c, r) = pick_tile(&self.grass, x as i32, y as i32);

@@ -47,8 +47,8 @@ pub const RED_ARCHER_RUN: &[u8] =
 pub const TREE1: &[u8] =
     include_bytes!("../assets/tiny_swords/Terrain/Resources/Wood/Trees/Tree1.png");
 
-pub const WATER_TILE: &[u8] =
-    include_bytes!("../assets/tiny_swords/Terrain/Tileset/Water Background color.png");
+pub const WATER_FOAM: &[u8] =
+    include_bytes!("../assets/tiny_swords/Terrain/Tileset/Water Foam.png");
 
 // Decorations
 pub const CLOUD1: &[u8] =
@@ -73,7 +73,7 @@ pub struct Terrain {
     pub cloud2: Sprite,
     pub cloud3: Sprite,
     pub cloud4: Sprite,
-    pub water: Sprite,
+    pub water_foam: Sprite,
 }
 
 pub struct Units {
@@ -174,16 +174,16 @@ impl Terrain {
             frame_height: 256.0,
         };
 
-        // water
-        let tex = Texture2D::from_file_with_format(WATER_TILE, None);
+        // water foam
+        let tex = Texture2D::from_file_with_format(WATER_FOAM, None);
         tex.set_filter(FilterMode::Nearest);
-        let frames = 1.0;
-        let water = Sprite {
+        let frames = 16.0;
+        let water_foam = Sprite {
             tex,
             frames,
-            scale: 1.0,
-            frame_width: 64.0 / frames,
-            frame_height: 64.0,
+            scale: 3.0,
+            frame_width: 3072.0 / frames,
+            frame_height: 192.0,
         };
 
         Terrain {
@@ -192,7 +192,7 @@ impl Terrain {
             cloud2,
             cloud3,
             cloud4,
-            water,
+            water_foam,
         }
     }
 }
