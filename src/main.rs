@@ -5,7 +5,7 @@ use std::collections::{HashMap, VecDeque};
 mod assets;
 
 pub const SQUARE_SIZE: f32 = 50.0;
-const NUM_SQUARES: usize = 30;
+const NUM_SQUARES: usize = 50;
 
 pub const FPS: f32 = 10.0;
 
@@ -29,7 +29,7 @@ enum UnitKind {
 enum Action {
     Idle,
     Run,
-    Attack((f32, usize)), // attack hold total animation time and enemy idx
+    Attack((f32, usize)), // attack holds total animation time and enemy idx
 }
 
 #[derive(Debug, Clone)]
@@ -72,7 +72,9 @@ struct Projectile {
 
 #[derive(Default)]
 struct Game {
+    clouds: Vec<Vec2>,
     grass: Vec<Vec<bool>>,
+    trees: Vec<Vec<bool>>,
     units: Vec<Unit>,
     enemy_units: Vec<Unit>,
     selected_unit: Option<usize>,
@@ -107,7 +109,9 @@ async fn main() {
 
     let mut game = Game::default();
     game.hit_chance = 50.0;
-    game.grass = vec![vec![true; NUM_SQUARES]; NUM_SQUARES];
+    game.grass = generate_map();
+    game.trees = generate_trees(&game.grass);
+    game.clouds = generate_clouds(&game.grass);
 
     // generate units
     {
@@ -363,8 +367,8 @@ impl Game {
     }
     fn draw(&self, assets: &assets::Assets) {
         // draw grass
-        for x in 0..NUM_SQUARES {
-            for y in 0..NUM_SQUARES {
+        for y in 0..NUM_SQUARES {
+            for x in 0..NUM_SQUARES {
                 let px = x as f32 * SQUARE_SIZE;
                 let py = y as f32 * SQUARE_SIZE;
                 if !self.grass[y][x] {
@@ -389,48 +393,43 @@ impl Game {
             }
         }
 
-        // draw clouds & trees
-        for x in 0..NUM_SQUARES {
-            for y in 0..NUM_SQUARES {
+        // draw trees
+        for y in 0..NUM_SQUARES {
+            for x in 0..NUM_SQUARES {
                 let px = x as f32 * SQUARE_SIZE;
                 let py = y as f32 * SQUARE_SIZE;
+                if !self.grass[y][x] || !self.trees[y][x] {
+                    continue;
+                }
+                assets
+                    .terrain
+                    .tree1
+                    .draw(self.total_frame_time, px, py, false, false);
+            }
+        }
 
-                if x == 3 && y == 4 {
-                    assets
-                        .terrain
-                        .cloud1
-                        .draw(self.total_frame_time, px, py, false, false);
-                }
-                if x == 13 && y == 4 {
-                    assets
-                        .terrain
-                        .cloud2
-                        .draw(self.total_frame_time, px, py, false, false);
-                }
-                if x == 20 && y == 4 {
-                    assets
-                        .terrain
-                        .cloud3
-                        .draw(self.total_frame_time, px, py, false, false);
-                }
-                if x == 20 && y == 4 {
-                    assets
-                        .terrain
-                        .cloud4
-                        .draw(self.total_frame_time, px, py, false, false);
-                }
-                if x == 10 && y == 10 {
-                    assets
-                        .terrain
-                        .tree1
-                        .draw(self.total_frame_time, px, py, false, false);
-                }
-                if x == 20 && y == 12 {
-                    assets
-                        .terrain
-                        .tree1
-                        .draw(self.total_frame_time, px, py, false, false);
-                }
+        // draw clouds
+        for (i, cloud) in self.clouds.iter().enumerate() {
+            if i % 5 == 0 {
+                assets
+                    .terrain
+                    .cloud4
+                    .draw(self.total_frame_time, cloud.x, cloud.y, false, false);
+            } else if i % 4 == 0 {
+                assets
+                    .terrain
+                    .cloud3
+                    .draw(self.total_frame_time, cloud.x, cloud.y, false, false);
+            } else if i % 3 == 0 {
+                assets
+                    .terrain
+                    .cloud2
+                    .draw(self.total_frame_time, cloud.x, cloud.y, false, false);
+            } else {
+                assets
+                    .terrain
+                    .cloud1
+                    .draw(self.total_frame_time, cloud.x, cloud.y, false, false);
             }
         }
 
@@ -586,6 +585,30 @@ impl Game {
 
         None
     }
+
+    fn cell_is_occupied(&self, cell: Cell) -> bool {
+        let x = cell[0];
+        let y = cell[1];
+        if !self.grass[y][x] {
+            return true;
+        }
+        if self.trees[y][x] {
+            return true;
+        }
+        if self.units.iter().find(|u| u.game_pos == cell).is_some() {
+            return true;
+        }
+        if self
+            .enemy_units
+            .iter()
+            .find(|u| u.game_pos == cell)
+            .is_some()
+        {
+            return true;
+        }
+
+        false
+    }
 }
 
 impl Unit {
@@ -718,13 +741,7 @@ impl Unit {
                 if dist.contains_key(&next_pos) {
                     continue;
                 }
-                let occupied = game.units.iter().find(|u| u.game_pos == next_pos).is_some()
-                    || game
-                        .enemy_units
-                        .iter()
-                        .find(|u| u.game_pos == next_pos)
-                        .is_some();
-                if occupied {
+                if game.cell_is_occupied(next_pos) {
                     continue;
                 }
 
@@ -873,4 +890,80 @@ fn new_unit(name: String, unit_kind: UnitKind, x: usize, y: usize) -> Unit {
         accuracy,
         projectile: None,
     }
+}
+
+// 1. Generates an organic, single-mass island
+fn generate_map() -> Vec<Vec<bool>> {
+    let mut map = vec![vec![false; NUM_SQUARES]; NUM_SQUARES];
+    let center = NUM_SQUARES as f32 / 2.0;
+    let base_radius = center * 0.75;
+
+    for y in 0..NUM_SQUARES {
+        for x in 0..NUM_SQUARES {
+            let dx = x as f32 - center;
+            let dy = y as f32 - center;
+            let distance = (dx * dx + dy * dy).sqrt();
+            let norm_dist = distance / center;
+
+            if norm_dist > 1.0 {
+                continue;
+            }
+
+            let nx = x as f32 / NUM_SQUARES as f32 * 6.0;
+            let ny = y as f32 / NUM_SQUARES as f32 * 6.0;
+            let noise = (nx * 3.5 + ny * 2.2).sin() * 6.0 + (nx * 7.1 - ny * 6.4).cos() * 3.0;
+            let falloff = 1.0 - norm_dist * norm_dist;
+
+            if distance < base_radius + noise * falloff {
+                map[y][x] = true; // Land
+            }
+        }
+    }
+    map
+}
+
+fn generate_trees(map: &[Vec<bool>]) -> Vec<Vec<bool>> {
+    let mut trees = vec![vec![false; NUM_SQUARES]; NUM_SQUARES];
+
+    for y in 0..NUM_SQUARES {
+        for x in 0..NUM_SQUARES {
+            // Must be land, and account for the 2-tile downward sprite height
+            if !map[y][x] || y + 1 >= NUM_SQUARES || !map[y + 1][x] {
+                continue;
+            }
+
+            // Pseudo-random integer hash for true, non-patterned scattering
+            let hash = ((x as u32).wrapping_mul(374761393)) ^ ((y as u32).wrapping_mul(668265263));
+            let random_val = hash as f32 / u32::MAX as f32;
+
+            // 3% chance for sparse, natural distribution
+            if random_val < 0.03 {
+                trees[y][x] = true;
+            }
+        }
+    }
+    trees
+}
+
+fn generate_clouds(map: &[Vec<bool>]) -> Vec<Vec2> {
+    let mut clouds = vec![];
+
+    for y in 0..NUM_SQUARES {
+        for x in 0..NUM_SQUARES {
+            if map[y][x] {
+                continue;
+            }
+
+            // Pseudo-random integer hash for true, non-patterned scattering
+            let hash = ((x as u32).wrapping_mul(374761393)) ^ ((y as u32).wrapping_mul(668265263));
+            let random_val = hash as f32 / u32::MAX as f32;
+
+            // 3% chance for sparse, natural distribution
+            if random_val < 0.02 {
+                clouds.push(vec2(x as f32 * SQUARE_SIZE, y as f32 * SQUARE_SIZE));
+            }
+        }
+    }
+
+    clouds
 }
