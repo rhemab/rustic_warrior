@@ -19,7 +19,7 @@ pub const TILEMAP: &[u8] =
 
 type Cell = [usize; 2];
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum UnitKind {
     Warrior,
     Archer,
@@ -38,7 +38,7 @@ struct Unit {
     unit_kind: UnitKind,
     action: Action,
     game_pos: [usize; 2],
-    view_pos: Vec2,
+    pos: Vec2,
     move_path: Vec<Cell>,
     flip_x: bool,
     last_dmg_taken: f32,
@@ -52,6 +52,22 @@ struct Unit {
     attack: f32,
     defense: f32,
     accuracy: f32,
+    projectile: Option<Projectile>,
+}
+
+#[derive(Debug, Clone)]
+enum ProjectileKind {
+    Arrow,
+}
+
+#[derive(Debug, Clone)]
+struct Projectile {
+    kind: ProjectileKind,
+    start: Vec2,
+    end: Vec2,
+    t: f32,        // progress 0.0 -> 1.0
+    duration: f32, // seconds of flight
+    arc_height: f32,
 }
 
 #[derive(Default)]
@@ -76,11 +92,13 @@ async fn main() {
     let blue_units = assets::Units::new_blue();
     let red_units = assets::Units::new_red();
     let terrain = assets::Terrain::new();
+    let projectiles = assets::Projectiles::new();
 
     let tiles = Texture2D::from_file_with_format(TILEMAP, None);
     tiles.set_filter(FilterMode::Nearest);
 
     let assets = assets::Assets {
+        projectiles,
         blue_units,
         red_units,
         terrain,
@@ -88,6 +106,7 @@ async fn main() {
     };
 
     let mut game = Game::default();
+    game.hit_chance = 50.0;
     game.grass = vec![vec![true; NUM_SQUARES]; NUM_SQUARES];
 
     // generate units
@@ -144,13 +163,13 @@ impl Game {
         self.hovering_enemy_unit = None;
 
         for (i, unit) in self.units.iter().enumerate() {
-            let pos = unit.view_pos;
+            let pos = unit.pos;
             if self.mouse_in_pos(pos) {
                 self.hovering_unit = Some(i);
             }
         }
         for (i, unit) in self.enemy_units.iter().enumerate() {
-            let pos = unit.view_pos;
+            let pos = unit.pos;
             if self.mouse_in_pos(pos) {
                 self.hovering_enemy_unit = Some(i);
             }
@@ -190,6 +209,7 @@ impl Game {
                         } else {
                             enemy.flip_x = false;
                         }
+                        unit.flip_x = !enemy.flip_x;
                     }
                 }
             }
@@ -203,10 +223,26 @@ impl Game {
 
         for (i, unit) in self.units.iter_mut().enumerate() {
             unit.update_pos(dt);
+            if let Some(p) = &mut unit.projectile {
+                if p.update(dt) {
+                    unit.projectile = None;
+                }
+            }
             match unit.action {
                 Action::Attack((anim_time, enemy_i)) => {
+                    let enemy = &mut self.enemy_units[enemy_i];
+
                     let sprite = unit.sprite(&assets.blue_units);
                     let frame = anim_time * FPS;
+                    if frame as usize == 5 {
+                        if unit.projectile.is_none() {
+                            if unit.unit_kind == UnitKind::Archer {
+                                let projectile =
+                                    Projectile::new(ProjectileKind::Arrow, unit.pos, enemy.pos);
+                                unit.projectile = Some(projectile);
+                            }
+                        }
+                    }
                     if frame > sprite.frames {
                         unit.action = Action::Idle;
                         // check hit_chance
@@ -216,8 +252,6 @@ impl Game {
                             hit = true;
                             self.hit_chance -= 100.0;
                         }
-
-                        let enemy = &mut self.enemy_units[enemy_i];
 
                         if hit {
                             // update health/despawn after the animation finishes
@@ -242,6 +276,7 @@ impl Game {
                                 } else {
                                     enemy.flip_x = false;
                                 }
+                                unit.flip_x = !enemy.flip_x;
                             }
                         }
                     }
@@ -264,10 +299,26 @@ impl Game {
 
         for unit in &mut self.enemy_units {
             unit.update_pos(dt);
+            if let Some(p) = &mut unit.projectile {
+                if p.update(dt) {
+                    unit.projectile = None;
+                }
+            }
             match unit.action {
                 Action::Attack((anim_time, enemy_i)) => {
+                    let enemy = &mut self.units[enemy_i];
+
                     let sprite = unit.sprite(&assets.blue_units);
                     let frame = anim_time * FPS;
+                    if frame as usize == 5 {
+                        if unit.projectile.is_none() {
+                            if unit.unit_kind == UnitKind::Archer {
+                                let projectile =
+                                    Projectile::new(ProjectileKind::Arrow, unit.pos, enemy.pos);
+                                unit.projectile = Some(projectile);
+                            }
+                        }
+                    }
                     if frame > sprite.frames {
                         unit.action = Action::Idle;
                         // check hit_chance
@@ -279,8 +330,6 @@ impl Game {
                         }
 
                         // update health/despawn after the animation finishes
-                        let enemy = &mut self.units[enemy_i];
-
                         if hit {
                             let dmg = (unit.attack - enemy.defense).max(0.0);
                             enemy.health -= dmg;
@@ -418,8 +467,8 @@ impl Game {
                 let enemy = &self.enemy_units[enemy_i];
                 if unit.enemy_in_range(enemy) {
                     draw_rectangle(
-                        enemy.view_pos.x,
-                        enemy.view_pos.y,
+                        enemy.pos.x,
+                        enemy.pos.y,
                         SQUARE_SIZE,
                         SQUARE_SIZE,
                         RED_HOVER_COLOR,
@@ -432,8 +481,8 @@ impl Game {
         if let Some(i) = self.hovering_unit {
             let unit = &self.units[i];
             draw_rectangle(
-                unit.view_pos.x,
-                unit.view_pos.y,
+                unit.pos.x,
+                unit.pos.y,
                 SQUARE_SIZE,
                 SQUARE_SIZE,
                 HOVER_COLOR,
@@ -449,6 +498,12 @@ impl Game {
                 }
             }
             unit.draw(self.total_frame_time, hovered, &assets.blue_units);
+
+            // draw projectile
+            if let Some(p) = &unit.projectile {
+                let sprite = p.sprite(&assets.projectiles);
+                p.draw(&sprite);
+            }
         }
 
         for (i, unit) in self.enemy_units.iter().enumerate() {
@@ -459,6 +514,12 @@ impl Game {
                 }
             }
             unit.draw(self.total_frame_time, hovered, &assets.red_units);
+
+            // draw projectile
+            if let Some(p) = &unit.projectile {
+                let sprite = p.sprite(&assets.projectiles);
+                p.draw(&sprite);
+            }
         }
     }
 
@@ -553,16 +614,16 @@ impl Unit {
                     self.game_pos[1] as f32 * SQUARE_SIZE,
                 );
 
-                let to_target = target_pos - self.view_pos;
+                let to_target = target_pos - self.pos;
                 let step = self.speed * dt;
 
                 if to_target.length() <= step {
                     self.action = Action::Idle;
-                    self.view_pos = target_pos;
+                    self.pos = target_pos;
                 } else {
                     self.action = Action::Run;
                     let dir = to_target.normalize();
-                    self.view_pos += dir * step;
+                    self.pos += dir * step;
                     if dir.x != 0.0 {
                         self.flip_x = dir.x < 0.0; // face the direction of travel
                     }
@@ -575,24 +636,19 @@ impl Unit {
     fn draw(&self, t: f32, _hovered: bool, units: &assets::Units) {
         match self.action {
             Action::Attack((anim_time, _)) => {
-                self.sprite(units).draw(
-                    anim_time,
-                    self.view_pos.x,
-                    self.view_pos.y,
-                    self.flip_x,
-                    true,
-                );
+                self.sprite(units)
+                    .draw(anim_time, self.pos.x, self.pos.y, self.flip_x, true);
             }
             _ => {
                 self.sprite(units)
-                    .draw(t, self.view_pos.x, self.view_pos.y, self.flip_x, false);
+                    .draw(t, self.pos.x, self.pos.y, self.flip_x, false);
             }
         }
 
         // draw health bar
         let offset = 5.0;
-        let x = self.view_pos.x + offset;
-        let y = self.view_pos.y + SQUARE_SIZE;
+        let x = self.pos.x + offset;
+        let y = self.pos.y + SQUARE_SIZE;
         let max_width = SQUARE_SIZE - (offset * 2.0);
         let width = (self.health * max_width) / self.max_health;
         if self.health < self.max_health {
@@ -603,16 +659,16 @@ impl Unit {
         if self.show_dmg_taken > 0.0 {
             let txt = format!("-{}", self.last_dmg_taken);
             let offset = SQUARE_SIZE / 2.0;
-            let x = self.view_pos.x + offset;
-            let y = self.view_pos.y;
+            let x = self.pos.x + offset;
+            let y = self.pos.y;
             draw_text(txt, x, y, 20.0, RED);
         }
 
         // show miss
         if self.show_miss > 0.0 {
             let offset = SQUARE_SIZE / 2.0;
-            let x = self.view_pos.x + offset;
-            let y = self.view_pos.y;
+            let x = self.pos.x + offset;
+            let y = self.pos.y;
             draw_text("MISS", x, y, 20.0, RED);
         }
     }
@@ -682,6 +738,62 @@ impl Unit {
     }
 }
 
+impl Projectile {
+    fn sprite<'b>(&self, projectiles: &'b assets::Projectiles) -> &'b assets::Sprite {
+        match self.kind {
+            ProjectileKind::Arrow => &projectiles.arrow,
+        }
+    }
+
+    fn new(kind: ProjectileKind, start: Vec2, end: Vec2) -> Self {
+        let dist = start.distance(end);
+        Projectile {
+            kind,
+            start,
+            end,
+            t: 0.0,
+            duration: dist / 400.0,  // 400 px/s, so far shots take longer
+            arc_height: dist * 0.25, // higher arc for longer shots
+        }
+    }
+
+    fn pos_at(&self, t: f32) -> Vec2 {
+        let flat = self.start.lerp(self.end, t);
+        // parabola: 0 at t=0 and t=1, peaks at t=0.5
+        let lift = 4.0 * t * (1.0 - t) * self.arc_height;
+        vec2(flat.x, flat.y - lift) // minus = up on screen (y points down)
+    }
+
+    fn update(&mut self, dt: f32) -> bool {
+        self.t = (self.t + dt / self.duration).min(1.0);
+        self.t >= 1.0 // true when it has landed
+    }
+
+    fn draw(&self, sprite: &assets::Sprite) {
+        let pos = self.pos_at(self.t);
+        // direction = where it will be a moment later, minus where it is now
+        let ahead = self.pos_at((self.t + 0.01).min(1.0));
+        let dir = ahead - pos;
+        let angle = dir.y.atan2(dir.x);
+
+        let scale = sprite.scale;
+        let size = SQUARE_SIZE * scale;
+        let offset = (size - SQUARE_SIZE) / 2.0;
+
+        draw_texture_ex(
+            &sprite.tex,
+            pos.x - offset,
+            pos.y - offset,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(vec2(size, size)),
+                rotation: angle, // assumes the sprite points right
+                ..Default::default()
+            },
+        );
+    }
+}
+
 const TILE: f32 = 64.0;
 
 fn src(col: usize, row: usize) -> Rect {
@@ -745,7 +857,7 @@ fn new_unit(name: String, unit_kind: UnitKind, x: usize, y: usize) -> Unit {
         unit_kind,
         action: Action::Idle,
         game_pos: [x, y],
-        view_pos: vec2(x as f32 * SQUARE_SIZE, y as f32 * SQUARE_SIZE),
+        pos: vec2(x as f32 * SQUARE_SIZE, y as f32 * SQUARE_SIZE),
         move_path: vec![],
         flip_x: false,
         last_dmg_taken: 0.0,
@@ -759,5 +871,6 @@ fn new_unit(name: String, unit_kind: UnitKind, x: usize, y: usize) -> Unit {
         attack,
         defense,
         accuracy,
+        projectile: None,
     }
 }

@@ -2,6 +2,9 @@ use macroquad::prelude::*;
 
 use crate::{FPS, SQUARE_SIZE};
 
+// Projectiles
+pub const ARROW: &[u8] = include_bytes!("../assets/tiny_swords/Units/Blue Units/Archer/Arrow.png");
+
 // Blue units
 pub const BLUE_WARRIOR_IDLE: &[u8] =
     include_bytes!("../assets/tiny_swords/Units/Blue Units/Warrior/Warrior_Idle.png");
@@ -60,6 +63,10 @@ pub const CLOUD3: &[u8] =
 pub const CLOUD4: &[u8] =
     include_bytes!("../assets/tiny_swords/Terrain/Decorations/Clouds/Clouds_04.png");
 
+pub struct Projectiles {
+    pub arrow: Sprite,
+}
+
 pub struct Terrain {
     pub tree1: Sprite,
     pub cloud1: Sprite,
@@ -82,18 +89,27 @@ pub struct Unit {
 
 #[derive(Debug)]
 pub struct Sprite {
-    tex: Texture2D,
+    pub tex: Texture2D,
     pub frames: f32,
     frame_width: f32,
     frame_height: f32,
-    scale: f32,
+    pub scale: f32,
 }
 
 pub struct Assets {
+    pub projectiles: Projectiles,
     pub blue_units: Units,
     pub red_units: Units,
     pub terrain: Terrain,
     pub tiles: Texture2D,
+}
+
+impl Projectiles {
+    pub fn new() -> Self {
+        let arrow = Sprite::new(ARROW, 1.0, 0.5, 64.0, 64.0);
+
+        Projectiles { arrow }
+    }
 }
 
 impl Terrain {
@@ -344,6 +360,18 @@ impl Units {
 }
 
 impl Sprite {
+    pub fn new(bytes: &[u8], frames: f32, scale: f32, width: f32, frame_height: f32) -> Self {
+        let tex = Texture2D::from_file_with_format(bytes, None);
+        tex.set_filter(FilterMode::Nearest);
+
+        Sprite {
+            tex,
+            frames,
+            scale,
+            frame_width: width / frames,
+            frame_height,
+        }
+    }
     pub fn draw(&self, t: f32, x: f32, y: f32, flip_x: bool, wrap: bool) {
         let frame = if wrap {
             ((t * FPS) as usize).min(self.frames as usize - 1)
