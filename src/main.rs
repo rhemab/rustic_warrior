@@ -547,14 +547,14 @@ impl Game {
             let x = margin;
             let y = screen_height() - h - margin;
             let txt = format!(
-                "{}\nHealth: {}/{}\nAttack: {}\nDefense: {}\nRange: {}\nAccuracy: {}\nMove: {}",
+                "{}\nHealth: {}/{}\nAttack: {}\nDefense: {}\nAccuracy: {}\nRange: {}\nMove: {}",
                 u.name,
                 u.health,
                 u.max_health,
                 u.attack,
                 u.defense,
-                u.range,
                 u.accuracy,
+                u.range,
                 u.movement
             );
             draw_rectangle(x, y, w, h, SELECT_MOVE_COLOR);
@@ -993,6 +993,9 @@ fn generate_units(game: &Game) -> Vec<Unit> {
 
     for y in 0..NUM_SQUARES {
         for x in 0..left_limit {
+            if game.trees[y][x] {
+                continue;
+            }
             if game.grass[y][x] {
                 left_tiles.push((x, y));
             }
@@ -1008,21 +1011,21 @@ fn generate_units(game: &Game) -> Vec<Unit> {
 
     // Interleaved array containing 5 Warriors and 5 Archers
     let kinds = [
-        UnitKind::Warrior,
-        UnitKind::Archer,
-        UnitKind::Warrior,
-        UnitKind::Archer,
-        UnitKind::Warrior,
-        UnitKind::Archer,
-        UnitKind::Archer,
-        UnitKind::Warrior,
-        UnitKind::Archer,
-        UnitKind::Warrior,
+        (UnitKind::Warrior, "Warrior".to_string()),
+        (UnitKind::Archer, "Archer".to_string()),
+        (UnitKind::Warrior, "Warrior".to_string()),
+        (UnitKind::Archer, "Archer".to_string()),
+        (UnitKind::Warrior, "Warrior".to_string()),
+        (UnitKind::Archer, "Archer".to_string()),
+        (UnitKind::Archer, "Archer".to_string()),
+        (UnitKind::Warrior, "Warrior".to_string()),
+        (UnitKind::Archer, "Archer".to_string()),
+        (UnitKind::Warrior, "Warrior".to_string()),
     ];
 
-    for kind in kinds {
+    for (kind, name) in kinds {
         if let Some(&(x, y)) = left_tiles.get(index) {
-            let u = new_unit("Player".to_string(), kind, x, y);
+            let u = new_unit(name, kind, x, y);
             units.push(u);
             index = (index + step) % left_tiles.len();
         }
@@ -1039,6 +1042,9 @@ fn generate_enemy_units(game: &Game) -> Vec<Unit> {
 
     for y in 0..NUM_SQUARES {
         for x in right_limit..NUM_SQUARES {
+            if game.trees[y][x] {
+                continue;
+            }
             if game.grass[y][x] {
                 right_tiles.push((x, y));
             }
